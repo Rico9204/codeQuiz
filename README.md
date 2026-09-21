@@ -1,2 +1,207 @@
+<<<<<<< HEAD
 # codeQuiz
 LLM 모델을 이용한 대화형 코드 이해도 검증 시스템
+=======
+# CodeViva Prototype
+
+제출된 프로젝트 코드에 대해 LLM이 코드 기반 질문을 생성하고, 참여자의 답변을 평가하여 **코드 이해도**를 확인하는 웹 프로토타입입니다.
+
+> 이 프로젝트는 AI 사용 여부를 직접 판정하기 위한 도구가 아닙니다.  
+> 제출자가 자신이 제출한 코드의 구조, 구현 이유, 예외 상황, 변경 영향을 이해하는지 확인하는 것이 목적입니다.
+
+## 주요 기능
+
+- 공개 GitHub Repository URL 입력
+- 프로젝트 폴더 업로드
+- 코드 직접 붙여넣기
+- 소스코드 자동 필터링
+- 분석 대상 파일 미리보기
+- 인터뷰 난이도 선택: 기초 / 보통 / 심화
+- LLM 기반 질문 5개 생성
+- Streamlit 채팅형 인터뷰
+- 답변별 0~4점 이해도 평가
+- 부족한 답변에 최대 1회 꼬리질문
+- 질문별 참고 답안 및 핵심 포인트 제공
+- 참고 답안 표시 시점 선택: 인터뷰 종료 후 / 각 질문 답변 후
+- 종합 이해도 및 영역별 결과
+- 질문/답변 기록 JSON 다운로드 및 서버 저장
+
+## 구조
+
+```text
+codeviva-prototype/
+├── app.py
+├── services/
+│   ├── github_service.py
+│   ├── code_analyzer.py
+│   ├── llm_service.py
+│   └── storage.py
+├── prompts/
+│   ├── question.txt
+│   ├── evaluation.txt
+│   ├── followup.txt
+│   └── report.txt
+├── data/
+│   └── sessions/
+├── .streamlit/
+│   └── config.toml
+├── .env.example
+├── requirements.txt
+└── README.md
+```
+
+## 실행 방법
+
+### 1. Python 가상환경 생성
+
+Windows:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+```
+
+macOS / Linux:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+### 2. 패키지 설치
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. 환경변수 설정
+
+`.env.example`을 복사해 `.env`를 생성합니다.
+
+```text
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-5.6-luna
+```
+
+`OPENAI_MODEL`은 사용 가능한 모델 ID로 변경할 수 있습니다.
+
+### 4. 실행
+
+```bash
+streamlit run app.py
+```
+
+기본적으로 브라우저에서 다음 주소로 접속할 수 있습니다.
+
+```text
+http://localhost:8501
+```
+
+## 사용 흐름
+
+```text
+코드 제출
+  ↓
+코드 파일 분석 및 필터링
+  ↓
+분석 대상 확인
+  ↓
+LLM 질문 5개 생성
+  ↓
+질문 → 사용자 답변 → 평가
+  ↓
+점수가 낮으면 꼬리질문
+  ↓
+최종 이해도 리포트
+```
+
+## 코드 제출 방식
+
+### GitHub
+
+공개 Repository URL을 입력합니다.
+
+```text
+https://github.com/owner/repository
+```
+
+프로토타입에서는 Private Repository를 지원하지 않습니다.
+
+### 프로젝트 폴더
+
+Streamlit의 디렉터리 업로드 기능을 이용해 폴더를 그대로 선택합니다.
+
+### 코드 붙여넣기
+
+알고리즘 문제나 단일 파일 프로젝트에 사용할 수 있습니다.
+
+## 기본 보안 처리
+
+다음 항목은 기본적으로 LLM 분석 대상에서 제외됩니다.
+
+- `.env`
+- credential / secret / private key 이름이 들어간 파일
+- `node_modules`
+- `.venv`, `venv`
+- `.git`
+- `dist`, `build`
+- lock 파일
+- 바이너리 파일
+- 지나치게 큰 파일
+
+다만 실제 운영 시에는 별도의 보안 검토와 데이터 보존 정책을 추가하는 것을 권장합니다.
+
+## 프로토타입 한계
+
+- LLM 평가가 사람의 판단을 완전히 대체하지 않습니다.
+- 이해도 점수는 AI 사용 확률이 아닙니다.
+- 큰 Repository는 전체 코드가 아니라 우선순위가 높은 일부 코드만 LLM에 전달됩니다.
+- GitHub 기여자/Commit 분석은 아직 포함하지 않습니다.
+- 회원 인증 및 관리자 대시보드는 포함하지 않습니다.
+
+## 다음 확장 후보
+
+1. GitHub OAuth 및 Private Repository
+2. Git Commit / Diff 기반 질문
+3. Tree-sitter 또는 AST 기반 코드 구조 분석
+4. 웹 코드 에디터를 이용한 실시간 수정 문제
+5. 운영자용 인터뷰 대시보드
+6. 질문 난이도 자동 조절
+7. 결과 DB 저장 및 참여자별 비교
+
+
+## 난이도 설정
+
+인터뷰 시작 전 다음 3단계 중 하나를 선택할 수 있습니다.
+
+- **기초**: 함수/클래스의 역할, 실행 순서, 주요 변수와 데이터 흐름 중심
+- **보통**: 구현 이유, 의존 관계, 코드 변경 영향, 간단한 예외 상황 포함
+- **심화**: Edge Case, 상태 변화, 성능/안전성, 변경 영향, 설계 trade-off 중심
+
+난이도는 단순히 질문 문장을 어렵게 만드는 것이 아니라,
+LLM 질문 생성 프롬프트의 사고 수준 자체를 변경합니다.
+
+## 참고 답안 기능
+
+질문을 생성할 때 다음 정보도 함께 생성합니다.
+
+```json
+{
+  "reference_answer": "제출 코드를 기반으로 한 참고 답안",
+  "key_points": [
+    "답변에서 확인해야 할 핵심 포인트"
+  ]
+}
+```
+
+평가 시에는 참고 답안의 표현을 그대로 말했는지가 아니라,
+핵심 내용을 의미적으로 이해했는지를 판단합니다.
+
+표시 방식은 두 가지입니다.
+
+- **인터뷰 종료 후 표시**: 검증 중심
+- **각 질문 답변 후 표시**: 학습 중심
+
+참고 답안은 제출 코드를 기반으로 LLM이 생성한 예시 설명이며,
+작성자의 실제 설계 의도와 다를 수 있습니다.
+>>>>>>> 0302c37 (Intiallize)
