@@ -19,6 +19,7 @@ from services.llm_service import (
     generate_report,
 )
 from services.storage import save_session
+from services.difficulty import next_difficulty
 
 
 load_dotenv()
@@ -45,6 +46,9 @@ def init_state():
         "records": [],
         "report": None,
         "interview_difficulty": "보통",
+        "current_difficulty": "보통",
+        "adaptive_difficulty": True,
+        "selected_paths": [],
         "answer_mode": "인터뷰 종료 후 표시",
         "session_id": uuid4().hex[:12],
     }
@@ -239,6 +243,20 @@ elif st.session_state.step == "preview":
         ),
     )
     st.session_state.interview_difficulty = difficulty
+    st.session_state.adaptive_difficulty = st.checkbox(
+        "답변에 따라 난이도 자동 조절",
+        value=st.session_state.adaptive_difficulty,
+        help="3~4점은 한 단계 상승, 2점은 유지, 0~1점은 하락합니다. 시작 난이도보다 최대 한 단계만 낮아집니다.",
+    )
+
+    file_paths = [file.path for file in st.session_state.code_files]
+    selected_paths = st.multiselect(
+        "질문 대상 파일",
+        file_paths,
+        default=st.session_state.selected_paths or file_paths,
+        help="대형 프로젝트에서는 이번 인터뷰에 포함할 파일만 선택하세요.",
+    )
+    st.session_state.selected_paths = selected_paths
 
     answer_mode = st.radio(
         "참고 답안 표시 방식",
@@ -268,16 +286,26 @@ elif st.session_state.step == "preview":
 
     with col2:
         if st.button("질문 생성 후 인터뷰 시작", type="primary", use_container_width=True):
+            if not selected_paths:
+                st.error("질문 대상 파일을 하나 이상 선택해주세요.")
+                st.stop()
+            selected_files = [
+                file for file in st.session_state.code_files if file.path in selected_paths
+            ]
+            st.session_state.code_context = build_llm_context(selected_files)
             with st.spinner("제출 코드에 맞는 질문을 생성하고 있습니다..."):
                 try:
                     questions = generate_questions(
                         st.session_state.code_context,
                         st.session_state.interview_difficulty,
+                        count=1,
                     )
+                    questions[0]["selected_difficulty"] = difficulty
                     st.session_state.questions = questions
                     st.session_state.queue = list(questions)
                     st.session_state.current_index = 0
                     st.session_state.records = []
+                    st.session_state.current_difficulty = difficulty
                     st.session_state.step = "interview"
                     st.rerun()
                 except LLMError as exc:
@@ -289,15 +317,43 @@ elif st.session_state.step == "interview":
     idx = st.session_state.current_index
 
     if idx >= len(queue):
-        st.session_state.step = "result"
-        st.rerun()
+        completed_base_questions = sum(
+            not record.get("is_followup") for record in st.session_state.records
+        )
+        if completed_base_questions >= 5:
+            st.session_state.step = "result"
+            st.rerun()
+        try:
+            with st.spinner("다음 질문을 생성하고 있습니다..."):
+                questions = generate_questions(
+                    st.session_state.code_context,
+                    st.session_state.current_difficulty,
+                    count=1,
+                    previous_questions=[record["question"] for record in st.session_state.records],
+                )
+                next_question = questions[0]
+                next_question["selected_difficulty"] = st.session_state.current_difficulty
+                st.session_state.questions.append(next_question)
+                st.session_state.queue.append(next_question)
+                st.rerun()
+        except LLMError as exc:
+            st.error(str(exc))
+            if st.button("다음 질문 다시 생성"):
+                st.rerun()
+            st.stop()
 
     question = queue[idx]
     total = len(queue)
 
     st.subheader("코드 인터뷰")
     st.progress(min(1.0, idx / max(1, total)))
-    st.caption(f"진행 {idx + 1} / {total}")
+    completed_base_questions = sum(
+        not record.get("is_followup") for record in st.session_state.records
+    )
+    st.caption(
+        f"기본 질문 {min(5, completed_base_questions + 1)} / 5 · "
+        f"현재 난이도: {st.session_state.current_difficulty}"
+    )
 
     # 이전 문답
     for record in st.session_state.records:
@@ -364,6 +420,7 @@ elif st.session_state.step == "interview":
                     followup = {
                         "question": followup_data["question"],
                         "difficulty": "follow-up",
+                        "selected_difficulty": question.get("selected_difficulty"),
                         "category": question.get("category", "logic"),
                         "target": question.get("target", ""),
                         "intent": "이전 답변에서 부족했던 이해도 추가 확인",
@@ -373,6 +430,13 @@ elif st.session_state.step == "interview":
                     }
                     st.session_state.queue.insert(idx + 1, followup)
 
+                if not question.get("is_followup"):
+                    st.session_state.current_difficulty = next_difficulty(
+                        st.session_state.current_difficulty,
+                        st.session_state.interview_difficulty,
+                        evaluation["score"],
+                        st.session_state.adaptive_difficulty,
+                    )
                 st.session_state.current_index += 1
                 st.rerun()
             except LLMError as exc:
@@ -486,6 +550,8 @@ elif st.session_state.step == "result":
         "source_type": st.session_state.source_type,
         "source_meta": st.session_state.source_meta,
         "interview_difficulty": st.session_state.interview_difficulty,
+        "adaptive_difficulty": st.session_state.adaptive_difficulty,
+        "selected_paths": st.session_state.selected_paths,
         "answer_mode": st.session_state.answer_mode,
         "stats": st.session_state.stats,
         "files": serializable_files(st.session_state.code_files),

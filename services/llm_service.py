@@ -89,12 +89,19 @@ def _parse_json(text: str) -> Any:
             raise LLMError("LLM JSON 응답을 해석할 수 없습니다.") from exc
 
 
-def generate_questions(code_context: str, difficulty: str = "보통") -> list[dict]:
+def generate_questions(
+    code_context: str,
+    difficulty: str = "보통",
+    count: int = 5,
+    previous_questions: list[str] | None = None,
+) -> list[dict]:
     difficulty = difficulty if difficulty in DIFFICULTY_GUIDES else "보통"
     prompt = _read_prompt("question.txt").format(
         code=code_context,
         difficulty=difficulty,
         difficulty_guide=DIFFICULTY_GUIDES[difficulty],
+        count=count,
+        previous_questions=json.dumps(previous_questions or [], ensure_ascii=False),
     )
     raw = _call(
         prompt,
@@ -106,7 +113,7 @@ def generate_questions(code_context: str, difficulty: str = "보통") -> list[di
         raise LLMError("질문 목록 형식이 올바르지 않습니다.")
 
     normalized = []
-    for item in data[:5]:
+    for item in data[:count]:
         if not isinstance(item, dict) or not item.get("question"):
             continue
 
@@ -127,7 +134,13 @@ def generate_questions(code_context: str, difficulty: str = "보통") -> list[di
             }
         )
 
-    if not normalized:
+    if (
+        len(normalized) != count
+        or any(
+            not question["reference_answer"] or len(question["key_points"]) < 2
+            for question in normalized
+        )
+    ):
         raise LLMError("사용 가능한 질문을 생성하지 못했습니다.")
     return normalized
 
@@ -192,6 +205,9 @@ def generate_followup(
     key_points = data.get("key_points", [])
     if not isinstance(key_points, list):
         key_points = []
+
+    if not str(data.get("reference_answer", "")).strip() or len(key_points) < 2:
+        raise LLMError("꼬리질문의 참고 답안 또는 핵심 포인트가 부족합니다.")
 
     return {
         "question": str(data["question"]).strip(),
