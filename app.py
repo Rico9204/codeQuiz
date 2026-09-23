@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import hmac
 from collections import defaultdict
 from pathlib import Path
 from uuid import uuid4
@@ -50,6 +51,8 @@ def init_state():
         "adaptive_difficulty": True,
         "selected_paths": [],
         "answer_mode": "인터뷰 종료 후 표시",
+        "llm_calls": 0,
+        "access_granted": False,
         "session_id": uuid4().hex[:12],
     }
     for key, value in defaults.items():
@@ -61,6 +64,18 @@ def reset_all():
     for key in list(st.session_state.keys()):
         del st.session_state[key]
     st.rerun()
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def call_llm(function, *args, **kwargs):
+    limit = int(os.getenv("CODEVIVA_MAX_LLM_CALLS", "20"))
+    if limit > 0 and st.session_state.llm_calls >= limit:
+        raise LLMError("이 인터뷰의 AI 요청 한도에 도달했습니다. 새 인터뷰를 시작해주세요.")
+    st.session_state.llm_calls += 1
+    return function(*args, **kwargs)
 
 
 def project_from_raw(raw_files, project_name: str, source_type: str, source_meta: dict):
@@ -120,6 +135,16 @@ def viewer_files():
 
 init_state()
 
+access_password = os.getenv("CODEVIVA_ACCESS_PASSWORD")
+if access_password and not st.session_state.access_granted:
+    st.title("CodeViva")
+    supplied_password = st.text_input("접속 비밀번호", type="password")
+    if supplied_password and hmac.compare_digest(supplied_password, access_password):
+        st.session_state.access_granted = True
+        st.rerun()
+    st.info("이 서비스는 승인된 사용자만 사용할 수 있습니다.")
+    st.stop()
+
 st.title("CodeViva")
 st.caption("제출된 코드를 기반으로 이해도를 확인하는 LLM 코드 구술시험 프로토타입")
 
@@ -144,6 +169,10 @@ with st.sidebar:
 
 if st.session_state.step == "submit":
     st.subheader("코드 제출")
+    st.info(
+        "제출한 코드와 답변은 질문·평가 생성을 위해 OpenAI API로 전송됩니다. "
+        "비밀번호, API 키, 개인정보가 포함된 코드는 제출하지 마세요."
+    )
 
     if not os.getenv("OPENAI_API_KEY"):
         st.warning(
@@ -318,7 +347,7 @@ elif st.session_state.step == "preview":
             st.session_state.code_context = build_llm_context(selected_files)
             with st.spinner("제출 코드에 맞는 질문을 생성하고 있습니다..."):
                 try:
-                    questions = generate_questions(
+                    questions = call_llm(generate_questions,
                         st.session_state.code_context,
                         st.session_state.interview_difficulty,
                         count=1,
@@ -348,7 +377,7 @@ elif st.session_state.step == "interview":
             st.rerun()
         try:
             with st.spinner("다음 질문을 생성하고 있습니다..."):
-                questions = generate_questions(
+                questions = call_llm(generate_questions,
                     st.session_state.code_context,
                     st.session_state.current_difficulty,
                     count=1,
@@ -433,7 +462,7 @@ elif st.session_state.step == "interview":
     if answer:
         with st.spinner("답변을 평가하고 있습니다..."):
             try:
-                evaluation = evaluate_answer(
+                evaluation = call_llm(evaluate_answer,
                     st.session_state.code_context,
                     question["question"],
                     answer,
@@ -455,7 +484,7 @@ elif st.session_state.step == "interview":
                     and evaluation["score"] <= 1
                     and evaluation.get("need_followup", True)
                 ):
-                    followup_data = generate_followup(
+                    followup_data = call_llm(generate_followup,
                         st.session_state.code_context,
                         question["question"],
                         answer,
@@ -499,7 +528,7 @@ elif st.session_state.step == "result":
     if st.session_state.report is None:
         with st.spinner("최종 결과를 정리하고 있습니다..."):
             try:
-                st.session_state.report = generate_report(records)
+                st.session_state.report = call_llm(generate_report, records)
             except LLMError as exc:
                 # 최종 요약 실패가 전체 결과 확인을 막지는 않도록 한다.
                 st.session_state.report = {
@@ -614,7 +643,9 @@ elif st.session_state.step == "result":
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("서버에 결과 저장", use_container_width=True):
+        if not env_flag("CODEVIVA_ENABLE_SERVER_SESSION_SAVE"):
+            st.caption("서버 저장은 기본적으로 꺼져 있습니다. 결과 JSON을 내려받아 보관하세요.")
+        elif st.button("서버에 결과 저장", use_container_width=True):
             path = save_session(payload)
             st.success(f"저장 완료: {path.name}")
 

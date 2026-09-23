@@ -93,6 +93,26 @@ streamlit run app.py
 http://localhost:8501
 ```
 
+## 배포 설정
+
+배포 환경에서는 `.env` 파일을 올리지 말고, 배포 서비스의 Secrets 또는 환경변수에
+`OPENAI_API_KEY`와 `OPENAI_MODEL`을 등록하세요. `.env.example`에 운영 설정 예시가 있습니다.
+
+공개 서비스라면 `CODEVIVA_ACCESS_PASSWORD`를 설정해 접속을 제한하고,
+`CODEVIVA_MAX_LLM_CALLS`로 인터뷰 한 세션의 AI 요청 수를 제한하세요. 기본값은 20회입니다.
+여러 사용자와 높은 트래픽을 지원하려면 이 메모리 기반 제한 대신 인증과 공유 저장소 기반의 요청 제한을 추가해야 합니다.
+
+GitHub 저장소 다운로드는 기본적으로 압축 파일 20MB, 파일 1,000개, 압축 해제 후 50MB로 제한됩니다.
+필요하면 `CODEVIVA_MAX_GITHUB_ARCHIVE_BYTES`, `CODEVIVA_MAX_GITHUB_ARCHIVE_FILES`,
+`CODEVIVA_MAX_GITHUB_UNCOMPRESSED_BYTES` 환경변수로 조정할 수 있습니다. 폴더 업로드는 20MB로 제한됩니다.
+
+결과의 서버 저장은 기본적으로 꺼져 있습니다. 사용자가 결과 JSON을 내려받아 보관하도록 하며,
+서버 저장이 필요한 경우에만 `CODEVIVA_ENABLE_SERVER_SESSION_SAVE=true`로 설정하세요.
+이 경우에는 보관 기간, 삭제 절차, 접근 권한을 별도로 운영해야 합니다.
+
+제출 코드와 답변은 질문과 평가 생성을 위해 OpenAI API로 전송됩니다. 파일명 기반 필터와 값 마스킹이 있어도
+완전한 비밀 탐지는 보장하지 않으므로 API 키, 비밀번호, 개인정보가 든 코드는 제출하면 안 됩니다.
+
 ## 사용 흐름
 
 ```text

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from pathlib import PurePosixPath
 from typing import Dict, Iterable, List, Tuple
+import re
 
 
 SUPPORTED_EXTENSIONS = {
@@ -60,7 +61,13 @@ SENSITIVE_NAME_PARTS = {
     "credential",
     "private_key",
     "id_rsa",
+    "api_key",
+    "access_key",
 }
+
+SENSITIVE_VALUE_RE = re.compile(
+    r"(?im)(\b(?:api[_-]?key|access[_-]?key|secret|token|password)\b\s*[:=]\s*[\"'])([^\"'\r\n]+)"
+)
 
 MAX_FILE_BYTES = 250_000
 MAX_FILE_CHARS_FOR_LLM = 18_000
@@ -94,6 +101,8 @@ def _is_excluded(path: str) -> bool:
 
     lower_name = p.name.lower()
     if lower_name in EXCLUDED_FILENAMES:
+        return True
+    if p.suffix.lower() in {".pem", ".key", ".p12", ".pfx"}:
         return True
     if any(part in lower_name for part in SENSITIVE_NAME_PARTS):
         return True
@@ -174,7 +183,8 @@ def build_llm_context(files: Iterable[CodeFile]) -> str:
         if remaining <= 0:
             break
 
-        content = file.content[: min(MAX_FILE_CHARS_FOR_LLM, remaining)]
+        content = SENSITIVE_VALUE_RE.sub(r"\1[REDACTED]", file.content)
+        content = content[: min(MAX_FILE_CHARS_FOR_LLM, remaining)]
         chunk = (
             f"\n===== FILE: {file.path} ({file.language}) =====\n"
             f"{content}\n"
