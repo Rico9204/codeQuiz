@@ -95,6 +95,29 @@ def aggregate_categories(records):
     }
 
 
+def code_language(language: str) -> str:
+    """Map analyzer labels to Streamlit's syntax-highlighting names."""
+    return {
+        "Python": "python",
+        "JavaScript": "javascript",
+        "JavaScript/React": "javascript",
+        "TypeScript": "typescript",
+        "TypeScript/React": "typescript",
+        "C++": "cpp",
+        "C/C++ Header": "cpp",
+        "C#": "csharp",
+    }.get(language, language.lower())
+
+
+def viewer_files():
+    selected_paths = set(st.session_state.selected_paths)
+    return [
+        file
+        for file in st.session_state.code_files
+        if not selected_paths or file.path in selected_paths
+    ]
+
+
 init_state()
 
 st.title("CodeViva")
@@ -384,6 +407,26 @@ elif st.session_state.step == "interview":
         target = question.get("target", "")
         st.markdown(f"**{label} · {target}**")
         st.write(question["question"])
+
+    files_for_viewer = viewer_files()
+    if files_for_viewer:
+        paths_for_viewer = [file.path for file in files_for_viewer]
+        target_path = next(
+            (path for path in paths_for_viewer if target and target.lower() in path.lower()),
+            paths_for_viewer[0],
+        )
+        with st.expander("코드 보기", expanded=False):
+            st.caption("답변 작성 중 제출 코드를 확인할 수 있습니다. 참고 답안은 표시되지 않습니다.")
+            selected_path = st.selectbox(
+                "파일",
+                paths_for_viewer,
+                index=paths_for_viewer.index(target_path),
+                key=f"code_viewer_{idx}",
+            )
+            file_to_show = next(
+                file for file in files_for_viewer if file.path == selected_path
+            )
+            st.code(file_to_show.content, language=code_language(file_to_show.language), line_numbers=True)
 
     answer = st.chat_input("핵심 이유나 흐름을 한두 문장으로 답해도 됩니다.")
 
