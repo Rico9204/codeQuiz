@@ -385,7 +385,7 @@ elif st.session_state.step == "interview":
         st.markdown(f"**{label} · {target}**")
         st.write(question["question"])
 
-    answer = st.chat_input("답변을 입력하세요.")
+    answer = st.chat_input("핵심 이유나 흐름을 한두 문장으로 답해도 됩니다.")
 
     if answer:
         with st.spinner("답변을 평가하고 있습니다..."):
@@ -396,6 +396,7 @@ elif st.session_state.step == "interview":
                     answer,
                     question.get("reference_answer", ""),
                     question.get("key_points", []),
+                    question.get("selected_difficulty", st.session_state.interview_difficulty),
                 )
 
                 record = {
@@ -405,10 +406,10 @@ elif st.session_state.step == "interview":
                 }
                 st.session_state.records.append(record)
 
-                # 기본 질문에서 이해가 부족한 경우에만 최대 한 번 꼬리질문.
+                # 핵심 이해가 거의 보이지 않을 때만 기본 질문당 최대 한 번 꼬리질문.
                 if (
                     not question.get("is_followup")
-                    and evaluation["score"] <= 2
+                    and evaluation["score"] <= 1
                     and evaluation.get("need_followup", True)
                 ):
                     followup_data = generate_followup(

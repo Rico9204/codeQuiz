@@ -30,6 +30,21 @@ DIFFICULTY_GUIDES = {
     ),
 }
 
+EVALUATION_DIFFICULTY_GUIDES = {
+    "기초": (
+        "핵심 역할이나 실행 흐름을 맞게 말하면 짧은 답변도 3점까지 인정하세요. "
+        "구현 이유, 변경 영향, 예외 상황은 4점을 위한 추가 근거입니다."
+    ),
+    "보통": (
+        "핵심 동작과 그 이유를 모두 설명하면 3점으로 인정하세요. "
+        "변경 영향이나 간단한 예외 상황은 4점을 위한 추가 근거입니다."
+    ),
+    "심화": (
+        "핵심 동작과 이유만 설명한 답변은 보통 2점으로 평가하세요. "
+        "3점 이상은 코드 근거를 바탕으로 영향, 예외 상황, 의존 관계 또는 설계 판단을 설명해야 합니다."
+    ),
+}
+
 
 class LLMError(RuntimeError):
     pass
@@ -151,13 +166,17 @@ def evaluate_answer(
     answer: str,
     reference_answer: str = "",
     key_points: list[str] | None = None,
+    difficulty: str = "보통",
 ) -> dict:
+    difficulty = difficulty if difficulty in EVALUATION_DIFFICULTY_GUIDES else "보통"
     prompt = _read_prompt("evaluation.txt").format(
         code=code_context,
         question=question,
         reference_answer=reference_answer or "(참고 답안 없음)",
         key_points=json.dumps(key_points or [], ensure_ascii=False),
         answer=answer,
+        difficulty=difficulty,
+        evaluation_difficulty_guide=EVALUATION_DIFFICULTY_GUIDES[difficulty],
     )
     raw = _call(
         prompt,
