@@ -61,8 +61,10 @@ def init_state():
 
 
 def reset_all():
+    # 새 인터뷰마다 비밀번호를 다시 묻지 않도록 인증 상태는 유지
     for key in list(st.session_state.keys()):
-        del st.session_state[key]
+        if key != "access_granted":
+            del st.session_state[key]
     st.rerun()
 
 
@@ -88,6 +90,8 @@ def project_from_raw(raw_files, project_name: str, source_type: str, source_meta
     st.session_state.source_type = source_type
     st.session_state.source_meta = source_meta
     st.session_state.code_files = files
+    st.session_state.selected_paths = []
+    st.session_state.pop("file_select", None)
     st.session_state.stats = stats
     st.session_state.code_context = build_llm_context(files)
     st.session_state.step = "preview"
@@ -163,7 +167,7 @@ with st.sidebar:
     st.divider()
     model = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
     st.caption(f"LLM: `{model}`")
-    if st.button("처음부터 다시 시작", use_container_width=True):
+    if st.button("처음부터 다시 시작", width="stretch"):
         reset_all()
 
 
@@ -275,7 +279,7 @@ elif st.session_state.step == "preview":
 
     st.markdown("#### 분석 대상 파일")
     file_rows = serializable_files(st.session_state.code_files)
-    st.dataframe(file_rows, use_container_width=True, hide_index=True)
+    st.dataframe(file_rows, width="stretch", hide_index=True)
 
     st.info(
         "보안을 위해 `.env`, credential/secret 관련 파일과 의존성 폴더는 분석에서 제외됩니다. "
@@ -283,10 +287,19 @@ elif st.session_state.step == "preview":
     )
 
     st.markdown("#### 인터뷰 설정")
+    # 위젯마다 고정 key 사용: index/value가 바뀌면 위젯 ID가 바뀌어 다음 클릭이 무시됨.
+    # 위젯 key는 화면을 벗어나면 삭제되므로 별도 상태값에서 다시 채운다.
+    for widget_key, state_key in (
+        ("difficulty_select", "interview_difficulty"),
+        ("adaptive_select", "adaptive_difficulty"),
+        ("answer_mode_select", "answer_mode"),
+    ):
+        st.session_state.setdefault(widget_key, st.session_state[state_key])
+
     difficulty = st.radio(
         "난이도",
         ["기초", "보통", "심화"],
-        index=["기초", "보통", "심화"].index(st.session_state.interview_difficulty),
+        key="difficulty_select",
         horizontal=True,
         help=(
             "기초: 코드 역할/실행 흐름 중심 · "
@@ -297,15 +310,18 @@ elif st.session_state.step == "preview":
     st.session_state.interview_difficulty = difficulty
     st.session_state.adaptive_difficulty = st.checkbox(
         "답변에 따라 난이도 자동 조절",
-        value=st.session_state.adaptive_difficulty,
+        key="adaptive_select",
         help="3~4점은 한 단계 상승, 2점은 유지, 0~1점은 하락합니다. 시작 난이도보다 최대 한 단계만 낮아집니다.",
     )
 
     file_paths = [file.path for file in st.session_state.code_files]
+    # 고정 key로 위젯 상태 유지 (default가 매번 바뀌면 위젯이 재생성되어 선택이 되돌아감)
+    if "file_select" not in st.session_state:
+        st.session_state.file_select = st.session_state.selected_paths or file_paths
     selected_paths = st.multiselect(
         "질문 대상 파일",
         file_paths,
-        default=st.session_state.selected_paths or file_paths,
+        key="file_select",
         help="대형 프로젝트에서는 이번 인터뷰에 포함할 파일만 선택하세요.",
     )
     st.session_state.selected_paths = selected_paths
@@ -313,9 +329,7 @@ elif st.session_state.step == "preview":
     answer_mode = st.radio(
         "참고 답안 표시 방식",
         ["인터뷰 종료 후 표시", "각 질문 답변 후 표시"],
-        index=["인터뷰 종료 후 표시", "각 질문 답변 후 표시"].index(
-            st.session_state.answer_mode
-        ),
+        key="answer_mode_select",
         horizontal=True,
     )
     st.session_state.answer_mode = answer_mode
@@ -337,7 +351,7 @@ elif st.session_state.step == "preview":
             st.rerun()
 
     with col2:
-        if st.button("질문 생성 후 인터뷰 시작", type="primary", use_container_width=True):
+        if st.button("질문 생성 후 인터뷰 시작", type="primary", width="stretch"):
             if not selected_paths:
                 st.error("질문 대상 파일을 하나 이상 선택해주세요.")
                 st.stop()
@@ -470,50 +484,57 @@ elif st.session_state.step == "interview":
                     question.get("key_points", []),
                     question.get("selected_difficulty", st.session_state.interview_difficulty),
                 )
+            except LLMError as exc:
+                st.error(str(exc))
+                st.stop()
 
-                record = {
-                    **question,
-                    "answer": answer,
-                    "evaluation": evaluation,
-                }
-                st.session_state.records.append(record)
+            record = {
+                **question,
+                "answer": answer,
+                "evaluation": evaluation,
+            }
+            st.session_state.records.append(record)
 
-                # 핵심 이해가 거의 보이지 않을 때만 기본 질문당 최대 한 번 꼬리질문.
-                if (
-                    not question.get("is_followup")
-                    and evaluation["score"] <= 1
-                    and evaluation.get("need_followup", True)
-                ):
+            # 핵심 이해가 거의 보이지 않을 때만 기본 질문당 최대 한 번 꼬리질문.
+            # 답변은 이미 기록됐으므로 꼬리질문 생성 실패 시 건너뛰고 진행한다(중복 기록 방지).
+            followup_data = None
+            if (
+                not question.get("is_followup")
+                and evaluation["score"] <= 1
+                and evaluation.get("need_followup", True)
+            ):
+                try:
                     followup_data = call_llm(generate_followup,
                         st.session_state.code_context,
                         question["question"],
                         answer,
                         evaluation,
                     )
-                    followup = {
-                        "question": followup_data["question"],
-                        "difficulty": "follow-up",
-                        "selected_difficulty": question.get("selected_difficulty"),
-                        "category": question.get("category", "logic"),
-                        "target": question.get("target", ""),
-                        "intent": "이전 답변에서 부족했던 이해도 추가 확인",
-                        "reference_answer": followup_data.get("reference_answer", ""),
-                        "key_points": followup_data.get("key_points", []),
-                        "is_followup": True,
-                    }
-                    st.session_state.queue.insert(idx + 1, followup)
+                except LLMError:
+                    pass
+            if followup_data:
+                followup = {
+                    "question": followup_data["question"],
+                    "difficulty": "follow-up",
+                    "selected_difficulty": question.get("selected_difficulty"),
+                    "category": question.get("category", "logic"),
+                    "target": question.get("target", ""),
+                    "intent": "이전 답변에서 부족했던 이해도 추가 확인",
+                    "reference_answer": followup_data.get("reference_answer", ""),
+                    "key_points": followup_data.get("key_points", []),
+                    "is_followup": True,
+                }
+                st.session_state.queue.insert(idx + 1, followup)
 
-                if not question.get("is_followup"):
-                    st.session_state.current_difficulty = next_difficulty(
-                        st.session_state.current_difficulty,
-                        st.session_state.interview_difficulty,
-                        evaluation["score"],
-                        st.session_state.adaptive_difficulty,
-                    )
-                st.session_state.current_index += 1
-                st.rerun()
-            except LLMError as exc:
-                st.error(str(exc))
+            if not question.get("is_followup"):
+                st.session_state.current_difficulty = next_difficulty(
+                    st.session_state.current_difficulty,
+                    st.session_state.interview_difficulty,
+                    evaluation["score"],
+                    st.session_state.adaptive_difficulty,
+                )
+            st.session_state.current_index += 1
+            st.rerun()
 
 
 elif st.session_state.step == "result":
@@ -645,10 +666,10 @@ elif st.session_state.step == "result":
     with col1:
         if not env_flag("CODEVIVA_ENABLE_SERVER_SESSION_SAVE"):
             st.caption("서버 저장은 기본적으로 꺼져 있습니다. 결과 JSON을 내려받아 보관하세요.")
-        elif st.button("서버에 결과 저장", use_container_width=True):
+        elif st.button("서버에 결과 저장", width="stretch"):
             path = save_session(payload)
             st.success(f"저장 완료: {path.name}")
 
     with col2:
-        if st.button("새 인터뷰 시작", use_container_width=True):
+        if st.button("새 인터뷰 시작", width="stretch"):
             reset_all()
